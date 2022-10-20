@@ -1,0 +1,384 @@
+---
+title: "FinalProject"
+author: "Hemang Gala"
+date: "11/21/2021"
+output:
+  beamer_presentation: default
+  powerpoint_presentation: default
+---
+
+Reading the data
+```{r}
+library(tidyverse)
+
+df <- read_csv("https://intro-datascience.s3.us-east-2.amazonaws.com/Resort01.csv")
+```
+data exploration
+```{r}
+str(df) ### structure of data
+
+summary(df) ### data summaries
+
+```
+
+numerical boxplots
+```{r}
+### 1 = cancelled, 0 = not cancelled
+
+boxplot(df$LeadTime~df$IsCanceled) ### significant
+
+boxplot(df$StaysInWeekendNights~df$IsCanceled) ### maybe significant
+
+boxplot(df$StaysInWeekNights~as.factor(df$IsCanceled)) ### maybe significant
+
+df <- df %>% mutate(stayTime = df$StaysInWeekendNights + StaysInWeekNights,
+              stayToLeadRatio = stayTime / LeadTime)
+
+boxplot(df$stayTime~df$IsCanceled) ### maybe significant
+
+boxplot(df$stayToLeadRatio~df$IsCanceled)
+
+boxplot(df$Adults~df$IsCanceled)
+
+boxplot(df$Children~df$IsCanceled)
+
+boxplot(df$Babies~df$IsCanceled)
+
+df <- df %>% mutate(guests = Adults + Children + Babies)
+
+boxplot(df$guests~df$IsCanceled)
+
+boxplot(df$PreviousCancellations~df$IsCanceled)
+
+boxplot(df$PreviousBookingsNotCanceled~df$IsCanceled)
+
+boxplot(df$PreviousCancellations/(df$PreviousBookingsNotCanceled+df$PreviousCancellations)~df$IsCanceled)
+
+boxplot(df$BookingChanges~df$IsCanceled)
+
+boxplot(df$RequiredCarParkingSpaces~df$IsCanceled)
+
+boxplot(df$TotalOfSpecialRequests~df$IsCanceled)
+```
+
+categorical bar charts
+```{r}
+df %>% ggplot() + geom_bar(aes( ### FB and SC significant
+  fill = as.factor(IsCanceled),
+  Meal
+), position = "fill")
+
+df %>% ggplot() + geom_bar(aes(
+  fill = as.factor(IsCanceled),
+  Country
+), position = "fill")
+
+df %>% ggplot() + geom_bar(aes( ### group and online ta significant
+  fill = as.factor(IsCanceled),
+  MarketSegment
+), position = "fill")
+
+df %>% ggplot() + geom_bar(aes( ### significant
+  fill = as.factor(IsCanceled),
+  IsRepeatedGuest
+), position = "fill")
+
+df %>% ggplot() + geom_bar(aes(
+  fill = as.factor(IsCanceled),
+  ReservedRoomType
+), position = "fill")
+
+df %>% ggplot() + geom_bar(aes(
+  fill = as.factor(IsCanceled),
+  AssignedRoomType
+), position = "fill")
+
+df %>% ggplot() + geom_bar(aes( ### non refund significant
+  fill = as.factor(IsCanceled),
+  DepositType
+), position = "fill")
+
+df %>% ggplot() + geom_bar(aes( ### tansient and transient part significant
+  fill = as.factor(IsCanceled),
+  CustomerType
+), position = "fill")
+```
+
+map plot
+```{r}
+library(car)
+library(countrycode)
+
+map <- map_data("world") ### geodata
+country <- df %>% group_by(Country) %>% summarise(cancellationRate = sum(IsCanceled)/n(), sample = n()) %>% 
+  mutate(countryname = countrycode(Country,"iso3c","country.name")) 
+### calculating cancellation rate and creating column for geodata join
+
+map_plot <- map %>% left_join(country,by=c("region"="countryname"))
+### joing geodata and country data
+
+ggplot(map_plot) + geom_polygon(aes(long,lat,group=group,fill=cancellationRate),color='white',size=.01) + coord_quickmap() + scale_fill_viridis_c() ### chloropleth mapping
+
+ggsave("mapPlot.pdf",width = 11,height = 5) 
+```
+
+Decision tree
+data cleaning
+```{r}
+library(Hmisc)
+
+hotel <- df
+
+### converting to factors
+hotel$Meal <- as.numeric(as.factor(hotel$Meal)) 
+hotel$MarketSegment <- as.numeric(as.factor(hotel$MarketSegment))
+hotel$ReservedRoomType <- as.numeric(as.factor(hotel$ReservedRoomType))
+hotel$AssignedRoomType <- as.numeric(as.factor(hotel$AssignedRoomType))
+hotel$DepositType <- as.numeric(as.factor(hotel$DepositType))
+hotel$CustomerType <- as.numeric(as.factor(hotel$CustomerType))
+```
+
+data cleaning
+```{r}
+library(caret)
+
+### df creation for model
+hotelTree1 <- data.frame(LeadTime=hotel$LeadTime,
+                      Cancellations=hotel$PreviousCancellations,
+                      BookingChanges=hotel$BookingChanges,
+                      ReqiredCarParkingSpaces=hotel$RequiredCarParkingSpaces,
+                      SpecialRequests=hotel$TotalOfSpecialRequests,
+                      RepeatedGuests=hotel$IsRepeatedGuest,
+                      CancelledBoking=as.factor(hotel$IsCanceled),
+                      MarketSegment=as.factor(hotel$MarketSegment),
+                      AssignedRoom=as.factor(hotel$AssignedRoomType),
+                      DepositType=as.factor(hotel$DepositType))
+```
+
+training/test data
+```{r}
+### creating traing and test sets
+train1 <- createDataPartition(y=hotelTree1$CancelledBoking, p=0.6, list = FALSE)
+trainset1 <- hotelTree1[train1,]
+testset1 <- hotelTree1[-train1,]
+```
+
+```{r}
+library(rpart)
+library(e1071)
+library(rpart.plot)
+
+### modeling
+tree1 <- rpart(CancelledBoking~., data = trainset1)
+### plotting
+rpart.plot(tree1)
+```
+
+```{r}
+#predicts the values using the tree and the testset.
+predictValues1 <- predict(tree1,newdata=testset1, type = "class") 
+
+### validating model
+confusionMatrix(predictValues1, testset1$CancelledBoking)
+```
+
+Arules 
+libraries
+```{r}
+library(arules)
+library(arulesViz)
+```
+
+data cleaning
+```{r}
+#Data set with all variables as factors. 
+
+hotel_data<-data.frame(IsCanceled=as.factor(hotel$IsCanceled),
+                     Leadtime=as.factor(hotel$LeadTime),
+                     Weekend_Stay=as.factor(hotel$StaysInWeekendNights),
+                     Weekday_Stay=as.factor(hotel$StaysInWeekNights),
+                     Adults=as.factor(hotel$Adults),
+                     Children=as.factor(hotel$Children),
+                     Babies=as.factor(hotel$Babies),
+                     Meal=as.factor(hotel$Meal),
+                     Country=as.factor(hotel$Country),
+                     Market_Segment=as.factor(hotel$MarketSegment),
+                     IsRepeatedGuest=as.factor(hotel$IsRepeatedGuest),
+                     PreviousCancellations=as.factor(hotel$PreviousCancellations),
+                     PreviousBookingsNotCancelled=as.factor(
+                       hotel$PreviousBookingsNotCanceled
+                     ),
+                     ReservedRoomType=as.factor(hotel$ReservedRoomType),
+                     AssignedRoomType=as.factor(hotel$AssignedRoomType),
+                     Booking_changes=as.factor(hotel$BookingChanges),
+                     Deposit_type=as.factor(hotel$DepositType),
+                     Customer_type=as.factor(hotel$CustomerType),
+                     RequiredCarParkingSpaces=as.factor(
+                       hotel$RequiredCarParkingSpaces),
+                     Special_requests=as.factor(hotel$TotalOfSpecialRequests))
+
+#Creating a transactional matrix
+hotel_x<-as(hotel_data,'transactions')
+```
+
+aRules model1
+```{r}
+
+#Generating a set of rules for the matrix.
+ruleset<- apriori(hotel_x, 
+parameter=list(supp=0.05
+               , conf=0.82),
+control=list(verbose=F),
+appearance=list(default="lhs",rhs=("IsCanceled=1")))
+
+#Inspecting the ruleset.
+inspectDT(ruleset)
+
+```
+
+
+data cleaning
+```{r}
+#Using only the key-driver variables.
+
+hotel_data3<-data.frame(IsCanceled=as.factor(hotel$IsCanceled),
+                     Leadtime=as.factor(hotel$LeadTime),
+                     Market_Segment=as.factor(hotel$MarketSegment),
+                     IsRepeatedGuest=as.factor(hotel$IsRepeatedGuest),
+                     PreviousCancellations=as.factor(hotel$PreviousCancellations),
+                     AssignedRoomType=as.factor(hotel$AssignedRoomType),
+                     Booking_changes=as.factor(hotel$BookingChanges),
+                     Deposit_type=as.factor(hotel$DepositType),
+                     RequiredCarParkingSpaces=as.factor(
+                       hotel$RequiredCarParkingSpaces),
+                     Special_requests=as.factor(hotel$TotalOfSpecialRequests))
+
+
+#Converting the data frame to a transactional matrix.
+
+imp_var<-as(hotel_data3,'transactions')
+```
+
+aRules model2
+```{r}
+#Using Apriori method to generate a ruleset.
+
+ruleset4<- apriori(imp_var, 
+parameter=list(supp=0.04
+               , conf=0.9),
+control=list(verbose=F),
+appearance=list(default="lhs",rhs=("IsCanceled=1")))
+
+
+#Inspecting the Ruleset.
+inspectDT(ruleset4)
+```
+
+SVM modeling
+data cleaning
+```{r}
+library(kernlab)
+
+### converting IsCanceled into factor
+df$IsCanceledFactor= as.factor(df$IsCanceled)
+
+### creating test and training df
+trainList<- createDataPartition(y=df$IsCanceledFactor, p=.60,list=FALSE)
+trainSet<- df[trainList,]
+testSet<-df[-trainList,]
+
+trainSetNew<- select(trainSet, -c(IsCanceled, Country))
+testSetNew<- select(testSet, -c(IsCanceled, Country))
+```
+
+```{r}
+significantVariablesDataFrame<-data.frame(df$LeadTime, df$BookingChanges, df$PreviousCancellations,df$RequiredCarParkingSpaces, df$TotalOfSpecialRequests,  df$IsRepeatedGuest, depositType = as.factor(df$DepositType), assignedRoomType= as.factor(df$AssignedRoomType), marketSegment = as.factor(df$MarketSegment), df$IsCanceled)
+
+significantVariablesDataFrame$IsCanceledFactor= as.factor(significantVariablesDataFrame$df.IsCanceled)
+```
+
+```{r}
+
+#Model trained considering the significant factors.
+trainListSignificantVariables<-createDataPartition(y=significantVariablesDataFrame$IsCanceledFactor, p=.80,list=FALSE)
+trainSetSignificantVariables<- significantVariablesDataFrame[trainList,]
+testSetSignificantVariables<-significantVariablesDataFrame[-trainList,]
+
+trainSetNewSignificantVariables<- select(trainSetSignificantVariables, -c(df$IsCanceled))
+testSetNewSignificantVariables<- select(testSetSignificantVariables, -c(df$IsCanceled))
+
+train_control<-trainControl(method="cv", number=3)
+svm_modelSignificantFeatures <- train(IsCanceledFactor~., data= trainSetNewSignificantVariables, method="svmRadial",trControl = train_control,preProcess = c("center","scale"))
+svm_modelSignificantFeatures
+
+### predictions
+predictedOutputSignificantFeatures <- predict(svm_modelSignificantFeatures, testSetNewSignificantVariables)
+
+### validating
+confusionMatrix(predictedOutputSignificantFeatures, testSetNewSignificantVariables$IsCanceledFactor)
+```
+
+```{r}
+#For our project, one of the models that we used to predict 
+#the cancellation of hotel was SVM. First, we began building the model
+#using just one feature. The accuracy 
+#72%.
+train_control<-trainControl(method="cv", number=3)
+svm_modelLeadTime <- train(IsCanceledFactor~LeadTime, data= trainSetNew, method="svmRadial",trControl = train_control,preProcess = c("center","scale"))
+
+### predictions
+predictedOutputLeadTime <- predict(svm_modelLeadTime, testSetNew)
+
+### validating
+confusionMatrix(predictedOutputLeadTime, testSetNew$IsCanceledFactor)
+
+```
+
+```{r}
+train_control<-trainControl(method="cv", number=3)
+#Commenting for knitting purpose.
+### parking spaces model
+svm_modelParkingSpaces <- train(IsCanceledFactor~ RequiredCarParkingSpaces, data= trainSetNew, method="svmRadial",trControl = train_control,preProcess = c("center","scale"))
+
+### predictions
+predictedOutputParkingSpaces <- predict(svm_modelParkingSpaces, testSetNew)
+
+### validating
+confusionMatrix(predictedOutputParkingSpaces, testSetNew$IsCanceledFactor)
+```
+
+```{r}
+### customer type model
+svm_modelCustomerType <- train(IsCanceledFactor~ CustomerType, data= trainSetNew, method="svmRadial",trControl = train_control,preProcess = c("center","scale"))
+
+### predictions
+predictedOutput2 <- predict(svm_modelCustomerType, testSetNew)
+
+### validating
+confusionMatrix(predictedOutputCustomerType, testSetNew$IsCanceledFactor)
+```
+
+```{r}
+### market segment model
+svm_modelMarketSegment <- train(IsCanceledFactor~ MarketSegment, data= trainSetNew, method="svmRadial",trControl = train_control,preProcess = c("center","scale"))
+
+### predictions
+predictedOutputMarketSegment <- predict(svm_modelMarketSegment, testSetNew)
+
+### validating
+confusionMatrix(predictedOutputMarketSegment, testSetNew$IsCanceledFactor)
+```
+
+```{r}
+### special requests model
+svm_modelTotalOfSpecialRequests <- train(IsCanceledFactor~ TotalOfSpecialRequests ,data= trainSetNew, method="svmRadial",trControl = train_control,preProcess = c("center","scale"))
+
+### predictions
+predictedOutputTotalOfSpecialRequests <- predict(svm_modelTotalOfSpecialRequests, testSetNew)
+
+### validating
+confusionMatrix(predictedOutputTotalOfSpecialRequests , testSetNew$IsCanceledFactor)
+
+
+
+```
